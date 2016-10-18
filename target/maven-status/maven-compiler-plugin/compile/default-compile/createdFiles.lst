@@ -1,0 +1,7 @@
+com/analyzingmapps/app/analyzer.class
+com/analyzingmapps/app/analyzer$checkSelfPermissionsVisitor.class
+com/analyzingmapps/app/analyzer$requestTimeVisitor.class
+com/analyzingmapps/app/dirTraverser$FileHandler.class
+com/analyzingmapps/app/analyzer$getRationaleVisitor.class
+com/analyzingmapps/app/dirTraverser.class
+com/analyzingmapps/app/dirTraverser$Filter.class
