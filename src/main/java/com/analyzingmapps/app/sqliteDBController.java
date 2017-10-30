@@ -17,7 +17,7 @@ public class sqliteDBController {
         Class.forName("org.sqlite.JDBC");
 
         try{
-            dbConnection = DriverManager.getConnection("jdbc:sqlite:/Users/x/IdeaProjects/AppAnalyzer/results");//"jdbc:sqlite:results");
+            dbConnection = DriverManager.getConnection("jdbc:sqlite:../results");//"jdbc:sqlite:results");
             dbConnection.setAutoCommit(false);
         }
         catch(SQLException se){
