@@ -1,0 +1,5 @@
+# User-specific stuff:
+.DS_Store
+.idea/*
+target/*
+results.html

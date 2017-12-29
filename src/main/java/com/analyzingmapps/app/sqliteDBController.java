@@ -3,6 +3,7 @@ package com.analyzingmapps.app;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
 
 
 /**
@@ -10,32 +11,95 @@ import java.util.HashMap;
  */
 public class sqliteDBController {
     //The db connection that allows for reads/updates
-    public Connection dbConnection = null;
+    public Connection dbPLintResultConnection = null;
+    public Connection dbAppsDatasetConnection = null;
 
     //Establishes connection to database that exists in same directory
     public void connectToDB() throws ClassNotFoundException{
         Class.forName("org.sqlite.JDBC");
 
         try{
-            dbConnection = DriverManager.getConnection("jdbc:sqlite:../results");//"jdbc:sqlite:results");
-            dbConnection.setAutoCommit(false);
+            dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:../osara/Tags-InProgress/database.sqlite");//"jdbc:sqlite:../results" "jdbc:sqlite:results");
+            dbPLintResultConnection = DriverManager.getConnection("jdbc:sqlite:results");//"jdbc:sqlite:../results" "jdbc:sqlite:results");
+            dbPLintResultConnection.setAutoCommit(false);
         }
         catch(SQLException se){
             System.out.println("[Error connecting to DB]: " + se);
         }
     }
 
-    public void addApkToList(String apkName){
+    /*
+     * Queries related to App Commits
+     */
+
+    public Map<String,String> getAppList(){
+        Map<String,String> data = new HashMap<>();
+
+        try {
+            Statement stmt = dbAppsDatasetConnection.createStatement();
+
+            ResultSet rs = stmt.executeQuery(
+                    "SELECT id, name FROM APP " );
+
+            while(rs.next()) {
+                int dataSetAppId = rs.getInt("id");
+                String appName = rs.getString("name");
+                addAppToList(dataSetAppId, appName);
+
+                data.put(String.valueOf(dataSetAppId),appName);
+            }
+            rs.close();
+            stmt.close();
+        } catch ( Exception e ) {
+            System.err.println("[Error getting getDatasetList]: " + e.getMessage() );
+        }
+
+        return data;
+    }
+
+    public ArrayList<String> getApkList(String appID){
+        ArrayList<String> data = new ArrayList<>();
+
+        try {
+
+            Statement stmt = dbAppsDatasetConnection.createStatement();
+
+            ResultSet rs = stmt.executeQuery(
+                    "SELECT ID, GUID, AUTHOR_NAME FROM COMMIT_LOG WHERE (appid = " + appID + ") ORDER BY DATE_TICKS ");
+
+            while(rs.next()) {
+                String apkGuid = rs.getString("GUID");
+                String apkAuthor = rs.getString("AUTHOR_NAME");
+                data.add(apkGuid);
+
+                addApkToList(apkGuid, appID, apkAuthor);
+            }
+            rs.close();
+            stmt.close();
+
+
+        } catch ( Exception e ) {
+            System.err.println("[Error getting getDatasetList]: " + e.getMessage() );
+        }
+
+        return data;
+    }
+
+    /*
+     * Queries related to App source
+     */
+
+    public void addApkToList(String apkName,String appID, String author){
         try{
             int apkID = getApkID(apkName);
             if(apkID == -1){
-                Statement stmt = dbConnection.createStatement();
-                String sql = "INSERT INTO apks (apk_name) VALUES (\""+apkName+"\")";
+                Statement stmt = dbPLintResultConnection.createStatement();
+                String sql = "INSERT INTO apks (apk_name,app_id,apk_author_name) VALUES (\""+apkName+"\","+appID+",\""+author+"\")";
 
                 stmt.executeUpdate(sql);
 
                 stmt.close();
-                dbConnection.commit();
+                dbPLintResultConnection.commit();
             }
         }
         catch(SQLException se){
@@ -43,10 +107,54 @@ public class sqliteDBController {
         }
     }
 
+
+    public int addAppToList(int dataSetAppId, String appName){
+        try{
+            int appID = getAppID(appName);
+            if(appID == -1){
+                Statement stmt = dbPLintResultConnection.createStatement();
+                String sql = "INSERT INTO apps (app_name, dataset_app_id) VALUES (\""+appName+"\", "+dataSetAppId+")";
+
+                stmt.executeUpdate(sql);
+                ResultSet rs = stmt.getGeneratedKeys();
+                if (rs.next()) {
+                    appID = rs.getInt(1);
+                }
+
+                stmt.close();
+                dbPLintResultConnection.commit();
+            }
+            return appID;
+        }
+        catch(SQLException se){
+            System.out.println("[Adding app to db]: "+se);
+        }
+        return -1;
+    }
+
+    public int getAppID(String appName){
+        int appID= -1;
+        try{
+            Statement stmt = dbPLintResultConnection.createStatement();
+            String sql = "SELECT dataset_app_id FROM apps WHERE (app_name = \"" + appName + "\")";
+            ResultSet rs = stmt.executeQuery(sql);
+
+            while(rs.next()){
+                appID = rs.getInt("dataset_app_id");
+            }
+            rs.close();
+            stmt.close();
+        }
+        catch(SQLException e){
+            System.out.println("[Error getting APP ID for " + appName +"]: "+e);
+        }
+        return appID;
+    }
+
     public int getApkID(String apkName){
         int apkID= -1;
         try{
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT apk_id FROM apks WHERE (apk_name = \"" + apkName + "\")";
             ResultSet rs = stmt.executeQuery(sql);
 
@@ -65,7 +173,7 @@ public class sqliteDBController {
     public String getApkName(int apkID){
         String apkName = "";
         try{
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT apk_name FROM apks WHERE (apk_id = " + apkID + ")";
             ResultSet rs = stmt.executeQuery(sql);
 
@@ -86,7 +194,7 @@ public class sqliteDBController {
         HashMap<String, String> useCaseInfo = new HashMap<String, String>();
 
         try {
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT usecase_desc, usecase_type FROM use_cases WHERE (usecase_id = "+useCaseId+")";
 
             ResultSet rs = stmt.executeQuery(sql);
@@ -108,7 +216,7 @@ public class sqliteDBController {
     public void insertReport(int apkID, int usecaseID, String fileName, int lineFound, String time){
 
         try {
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "INSERT INTO reports (apk_id, last_run, usecase_id, file_name, line_found ) " +
                     "VALUES (" + apkID + ", \"" + time + "\", " + usecaseID + ", \"" + fileName+"\", "+lineFound+")";
             stmt.executeUpdate(sql);
@@ -126,7 +234,7 @@ public class sqliteDBController {
         HashMap<String, Integer> foundUseCases = new HashMap<String, Integer>();
 
         try{
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT usecase_id, file_name, line_found FROM reports " +
                     "WHERE (apk_id = " + apkID + " AND last_run = \"" + lastRun + "\")";
 
@@ -178,13 +286,13 @@ public class sqliteDBController {
 
     public void updateLatestResults(int apkID, String lastRun){
         try{
-            Statement chkStmt = dbConnection.createStatement();
+            Statement chkStmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT * FROM latest_results WHERE (apk_id = " + apkID + ")";
 
             ResultSet rs = chkStmt.executeQuery(sql);
             if(!rs.next()){
                 chkStmt.close();
-                Statement stmt = dbConnection.createStatement();
+                Statement stmt = dbPLintResultConnection.createStatement();
 
                 sql = "INSERT INTO latest_results (apk_id, last_run) VALUES (" +apkID +", \""+ lastRun+"\")";
                 stmt.executeUpdate(sql);
@@ -192,13 +300,13 @@ public class sqliteDBController {
             }
             else{
                 chkStmt.close();
-                Statement stmt = dbConnection.createStatement();
+                Statement stmt = dbPLintResultConnection.createStatement();
 
                 sql = "UPDATE latest_results SET last_run = \""+ lastRun +"\" WHERE apk_id = " + apkID ;
                 stmt.executeUpdate(sql);
             }
 
-            dbConnection.commit();
+            dbPLintResultConnection.commit();
             rs.close();
         }
         catch(SQLException se){
@@ -210,7 +318,7 @@ public class sqliteDBController {
         HashMap<String, ArrayList<String>> results = new HashMap<String, ArrayList<String>>();
 
         try{
-            Statement stmt = dbConnection.createStatement();
+            Statement stmt = dbPLintResultConnection.createStatement();
             String sql = "SELECT apk_id, last_run FROM latest_results";
 
             ResultSet rs = stmt.executeQuery(sql);

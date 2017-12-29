@@ -3,15 +3,15 @@ package com.analyzingmapps.app;
 import java.io.*;
 import java.sql.SQLException;
 import java.text.DateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.ArrayList;
+import java.util.*;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseException;
 import com.github.javaparser.ast.CompilationUnit;
-import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
+import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Node;
@@ -20,29 +20,50 @@ import org.w3c.dom.Document;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.text.SimpleDateFormat;
-import java.util.TimeZone;
 
 
 /**
  * Created by Colton Dennis on 10/4/16.
  */
 public class analyzer {
-//    private HashMap<String, ArrayList<HashMap<String, Object>>> finalResults = new HashMap<String, ArrayList<HashMap<String, Object>>>();
+    File parentDirectory;
     /*
     Goes through folder of decompiled APK's
      */
     public void traverseApks(File apkDir, String timestamp, sqliteDBController dbCont){
-        String[] apks = apkDir.list();
+        //String[] apks = apkDir.list();
 
+        //apkdir = ./osara/commit_logs/
+
+        //Read a list of apps
+        //Inserts apps if dont exists
+        Map<String,String> apps = dbCont.getAppList();
+        String appName = "";
+
+        for (String appId: apps.keySet()) {
+            appName = apps.get(appId);
+            //Reads a list of commits ordered by date
+            //Inserts commits into apks if they dont exists.
+            for (String commitGUID: dbCont.getApkList(appId)){
+                File appDir = new File(apkDir, appName + "/"+commitGUID);
+                if (appDir.exists()) {
+                    traverseManifests(appDir, commitGUID, dbCont, timestamp);
+                    traverseSrcCode(commitGUID, appDir, timestamp, dbCont);
+                }
+            }
+        }
+
+/*
         for(String apkName : apks){
             dbCont.addApkToList(apkName);
 
             File appDir = new File(apkDir, apkName + "/app");
             analyzeManifest(appDir, apkName, dbCont, timestamp);
 
-            File srcCodeDir = new File(appDir, "src/android/support/v4");
+            File srcCodeDir = new File(appDir, "src"); //"src/android/support/v4"
             traverseSrcCode(apkName, srcCodeDir, timestamp, dbCont);
-        }
+        }*/
+
         HashMap<String, ArrayList<String>> latestResults = dbCont.getLatestResults();
 
         try{
@@ -128,14 +149,16 @@ public class analyzer {
                     for(String lineNum: fileRequestCalls.keySet()){
                         int line = Integer.parseInt(lineNum);
                         reqsCalled.add(line);
+//                        System.out.println("#############################################################");
+//                        System.out.println(fileName);
+//                        System.out.println("#############################################################");
+                        HashMap<String, String> outerFileCheckPermCalls = getOuterSelfPermsCalls(currentDir, apkName, line);
 
-                        if(fileCheckPermCalls == null){
+                        if(fileCheckPermCalls == null && outerFileCheckPermCalls.isEmpty()) {
                             dbCont.insertReport(apkID, 5, fileName, line, timestamp);
-                        }
-                        else{
+                        } else{
                             dbCont.insertReport(apkID, 6, fileName, line, timestamp);
                         }
-
                     }
 
                     for(int calls: reqsCalled){
@@ -154,11 +177,63 @@ public class analyzer {
 
     }
 
+
+    private void traverseManifests(File projectDir, String apkName, sqliteDBController dbCont, String timestamp) {
+        searchPathsFound = null;
+        searchPathsFound = new ArrayList<>();
+        if (projectDir.isDirectory()) {
+            search(projectDir, "AndroidManifest.xml");
+        }
+
+        // Analyze manifest if there is only one found
+        //System.out.println("BASE PATH " + projectDir);
+        //System.out.println("Found AndroidManifest \n " + searchPathsFound);
+        if (searchPathsFound.size() == 1) {
+            //System.out.println("Found AndroidManifest first attempt \n " + searchPathsFound.get(0));
+            analyzeManifest(searchPathsFound.get(0), apkName, dbCont, timestamp);
+        } else if (searchPathsFound.size() > 1) {
+            // If there is more, cleanup the list
+            List<File> unwantedFiles = new ArrayList<>();
+            for (File item: searchPathsFound) {
+                if (item.getPath().contains("/bin/") ||
+                        item.getPath().contains("/lib/") ||
+                        item.getPath().contains("/test/") ||
+                        item.getPath().contains("/debug/") ||
+                        item.getPath().contains("fdroid/") ||
+                        item.getPath().contains("/build/")) {
+                    unwantedFiles.add(item);
+                }
+            }
+            searchPathsFound.removeAll(unwantedFiles);
+            //If there is more than one, search for src/main folder
+            if (searchPathsFound.size() > 1) {
+                //System.out.println("Found AndroidManifest cleaned list \n " + searchPathsFound);
+                boolean foundIt = false;
+                for (File item: searchPathsFound) {
+                    if (item.getPath().contains("/src/main/")) {
+                        analyzeManifest(item, apkName, dbCont, timestamp);
+                        foundIt = true;
+                        break;
+                    }
+                }
+                if (!foundIt) {
+                    int apkID = dbCont.getApkID(apkName);
+                    //17: Manifest not identified, manually verification needed
+                    dbCont.insertReport(apkID, 17, "AndroidManifest.xml", -1, timestamp);
+                }
+            } else {
+                // Analyze manifest if there is only one found
+                //System.out.println("Found AndroidManifest after clean \n " + searchPathsFound.get(0));
+                analyzeManifest(searchPathsFound.get(0), apkName, dbCont, timestamp);
+            }
+        }
+    }
+
     /*
     Searches AndroidManifest.xml files
     */
-    public void analyzeManifest(File projectDir, String apkName, sqliteDBController dbCont, String timestamp){
-        File manifest = new File(projectDir, "AndroidManifest.xml");
+    public void analyzeManifest(File manifest, String apkName, sqliteDBController dbCont, String timestamp){
+        //File manifest = new File(projectDir, "/AndroidManifest.xml");
         int apkID = dbCont.getApkID(apkName);
 
         try {
@@ -238,6 +313,7 @@ public class analyzer {
 
                 else if(sdkMaxVersion != null){
                     int maxVersion = Integer.parseInt(sdkMaxVersion.getNodeValue());
+
                     if(maxVersion < 23){
                         dbCont.insertReport(apkID, 12, "AndroidManifest.xml", -1, timestamp);
                     }
@@ -255,7 +331,7 @@ public class analyzer {
             }
 
         }
-        catch(IOException ioe){System.out.println("Could not find AndroidManifest.xml for " + apkName);}
+        catch(IOException ioe){System.out.println("Could not read AndroidManifest.xml for " + manifest.getPath());}
         catch(Exception e){System.out.println("Something went wrong parsing the Android Manifest XML: " + e);}
     }
 
@@ -280,7 +356,7 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getRationaleCalls syntax error");}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);
         }
         return null;
@@ -326,7 +402,7 @@ public class analyzer {
             }
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getRequestPermsCalls syntax error");}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
 
         return null;
@@ -354,6 +430,75 @@ public class analyzer {
     }
 
     /*
+    Checks when requestPermission is called within another source code
+    */
+    public HashMap<String, String> getOuterSelfPermsCalls(File projectDir, String apkName, final int permReqLineNum) {
+//        System.out.println("Analyzing  Outer SelfPermsCalls *************************************** ");
+
+        final HashMap<String, String> fileCheckSelfMap = new HashMap<String, String>();
+        final int searchLimitLine = permReqLineNum - 10;
+        FileInputStream in;
+
+        try {
+            in = new FileInputStream(projectDir);
+            final CompilationUnit cu = JavaParser.parse(in);
+            final List<ImportDeclaration> cuImports = cu.getImports();
+            in.close();
+            final File srcCodeDir = new File(parentDirectory, apkName + "/app/src");
+
+            (new VoidVisitorAdapter<Object>() {
+                @Override
+                public void visit(final MethodCallExpr methodCallExpr, Object arg) {
+                    // Search for the method calls that are 10 lines before the "requestPermissions" call
+                    if (methodCallExpr.getBegin().line < permReqLineNum && methodCallExpr.getBegin().line > searchLimitLine) {
+                        if (methodCallExpr.getScope() != null) {
+                            for (ImportDeclaration itemImport : cuImports) {
+                                if (itemImport.getName().getName().equals(methodCallExpr.getScope().toString())) {
+                                    String innerFilePath = srcCodeDir + "/" + itemImport.getName().toString().replace(".", "/") + ".java";
+                                    File innerFile = new File(innerFilePath);
+                                    if (innerFile.exists()) {
+                                        //System.out.println("Found Class == " + innerFile.getAbsolutePath());
+                                        try {
+                                            CompilationUnit innerCU = JavaParser.parse(innerFile);
+                                            (new VoidVisitorAdapter<Object>() {
+                                                @Override
+                                                public void visit(MethodDeclaration mDeclaration, Object arg) {
+                                                    if (methodCallExpr.getName().equals(mDeclaration.getName())) {
+                                                        for (Statement stmt : mDeclaration.getBody().getStmts()) {
+                                                            if (stmt.toString().contains("checkSelfPermission")) {
+                                                                fileCheckSelfMap.put(String.valueOf(mDeclaration.getBegin().line), mDeclaration.getName());
+                                                            }
+                                                        }
+                                                    }
+                                                    super.visit(mDeclaration, arg);
+                                                }
+                                            }).visit(innerCU, null);
+                                        }
+                                        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+                                        catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
+                                        catch(IOException ioe){System.out.println(ioe);}
+                                    }
+
+                                }
+                            }
+                        }
+                    }
+
+                    super.visit(methodCallExpr, arg);
+                }
+            }).visit(cu, null);
+        }
+        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+        catch(ParseException pe){System.out.println("getOuterSelfPermsCalls syntax error");}//ignore, since it's the app developer's fault
+        catch(IOException ioe){System.out.println(ioe);}
+
+//        System.out.println("END Analyzing  Outer SelfPermsCalls ***************************************");
+//        System.out.println("Found " + fileCheckSelfMap);
+//        System.out.println("END Analyzing  Outer SelfPermsCalls ***************************************");
+        return fileCheckSelfMap;
+    }
+
+    /*
     Checks source code for checkSelfPermission calls
      */
     public HashMap<String, String> getSelfPermsCalls(File projectDir, String fileName){
@@ -372,7 +517,7 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getSelfPermsCalls syntax error");}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
 
         return null;
@@ -386,7 +531,7 @@ public class analyzer {
         private boolean foundInstance = false;
 
         @Override
-        public void visit(MethodDeclaration n, Object arg){
+        public void visit(MethodCallExpr n, Object arg){
             if(n.getName().compareTo("checkSelfPermission")==0){
                 if(!foundInstance){
                     foundInstance = true;
@@ -398,6 +543,28 @@ public class analyzer {
         }
     }
 
+    /*
+    Search particular file recursively
+     */
+    private List<File> searchPathsFound = new ArrayList();
+    private void search(File file, String name) {
+        if (file.isDirectory()) {
+            if (file.canRead()) {
+                for (File temp : file.listFiles()) {
+                    if (temp.isDirectory()) {
+                        search(temp, name);
+                    } else {
+                        if (name.equals(temp.getName())) {
+                            searchPathsFound.add(temp);
+                        }
+
+                    }
+                }
+
+            }
+        }
+
+    }
 
 
     // args[0] points to relative decompiled apk path: "./apk-decompiler/uncompressed-apks"
@@ -415,19 +582,21 @@ public class analyzer {
         }
 
         System.out.println("Analyzing apks...");
-        File apkDir = new File( args[0] );
         try{
             Date lastRun = new Date();
             String timestamp = df.format(lastRun);
 
             analyzer newAnalyzer = new analyzer();
-            newAnalyzer.traverseApks(apkDir, timestamp, dbCont);
+            newAnalyzer.parentDirectory = new File( args[0] );
+
+            newAnalyzer.traverseApks(newAnalyzer.parentDirectory, timestamp, dbCont);
         }
         finally{
             try{
-                dbCont.dbConnection.close();
+                dbCont.dbPLintResultConnection.close();
+                dbCont.dbAppsDatasetConnection.close();
             }
-            catch(SQLException se){
+            catch(SQLException se) {
                 System.out.print(se);
             }
         }
