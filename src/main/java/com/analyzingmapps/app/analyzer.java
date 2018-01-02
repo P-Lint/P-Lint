@@ -432,11 +432,11 @@ public class analyzer {
     /*
     Checks when requestPermission is called within another source code
     */
-    public HashMap<String, String> getOuterSelfPermsCalls(File projectDir, String apkName, final int permReqLineNum) {
+    public HashMap<String, String> getOuterSelfPermsCalls(final File projectDir, String apkName, final int permReqLineNum) {
 //        System.out.println("Analyzing  Outer SelfPermsCalls *************************************** ");
 
         final HashMap<String, String> fileCheckSelfMap = new HashMap<String, String>();
-        final int searchLimitLine = permReqLineNum - 10;
+        final int searchLimitLine = permReqLineNum - 20;
         FileInputStream in;
 
         try {
@@ -444,7 +444,7 @@ public class analyzer {
             final CompilationUnit cu = JavaParser.parse(in);
             final List<ImportDeclaration> cuImports = cu.getImports();
             in.close();
-            final File srcCodeDir = new File(parentDirectory, apkName + "/app/src");
+//            final File srcCodeDir = new File(parentDirectory, apkName + "/app/src");
 
             (new VoidVisitorAdapter<Object>() {
                 @Override
@@ -454,31 +454,37 @@ public class analyzer {
                         if (methodCallExpr.getScope() != null) {
                             for (ImportDeclaration itemImport : cuImports) {
                                 if (itemImport.getName().getName().equals(methodCallExpr.getScope().toString())) {
-                                    String innerFilePath = srcCodeDir + "/" + itemImport.getName().toString().replace(".", "/") + ".java";
-                                    File innerFile = new File(innerFilePath);
-                                    if (innerFile.exists()) {
-                                        //System.out.println("Found Class == " + innerFile.getAbsolutePath());
-                                        try {
-                                            CompilationUnit innerCU = JavaParser.parse(innerFile);
-                                            (new VoidVisitorAdapter<Object>() {
-                                                @Override
-                                                public void visit(MethodDeclaration mDeclaration, Object arg) {
-                                                    if (methodCallExpr.getName().equals(mDeclaration.getName())) {
-                                                        for (Statement stmt : mDeclaration.getBody().getStmts()) {
-                                                            if (stmt.toString().contains("checkSelfPermission")) {
-                                                                fileCheckSelfMap.put(String.valueOf(mDeclaration.getBegin().line), mDeclaration.getName());
+                                    String fileName = itemImport.getName().getName().toString()  + ".java";
+                                    searchPathsFound = null;
+                                    searchPathsFound = new ArrayList<>();
+                                    search(parentDirectory, fileName);
+
+                                    if (searchPathsFound.size() > 0) {
+                                        File innerFile = searchPathsFound.get(0);
+
+                                        if (innerFile.exists()) {
+                                            //System.out.println("Found Class == " + innerFile.getAbsolutePath());
+                                            try {
+                                                CompilationUnit innerCU = JavaParser.parse(innerFile);
+                                                (new VoidVisitorAdapter<Object>() {
+                                                    @Override
+                                                    public void visit(MethodDeclaration mDeclaration, Object arg) {
+                                                        if (methodCallExpr.getName().equals(mDeclaration.getName())) {
+                                                            for (Statement stmt : mDeclaration.getBody().getStmts()) {
+                                                                if (stmt.toString().contains("checkSelfPermission")) {
+                                                                    fileCheckSelfMap.put(String.valueOf(mDeclaration.getBegin().line), mDeclaration.getName());
+                                                                }
                                                             }
                                                         }
+                                                        super.visit(mDeclaration, arg);
                                                     }
-                                                    super.visit(mDeclaration, arg);
-                                                }
-                                            }).visit(innerCU, null);
+                                                }).visit(innerCU, null);
+                                            }
+                                            catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+                                            catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
+                                            catch(IOException ioe){System.out.println(ioe);}
                                         }
-                                        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-                                        catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
-                                        catch(IOException ioe){System.out.println(ioe);}
                                     }
-
                                 }
                             }
                         }
