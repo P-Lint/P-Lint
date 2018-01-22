@@ -31,38 +31,18 @@ public class analyzer {
     Goes through folder of decompiled APK's
      */
     public void traverseApks(File apkDir, String timestamp, sqliteDBController dbCont){
-        //String[] apks = apkDir.list();
-
-        //apkdir = ./osara/commit_logs/
-
-        //Read a list of apps
-        //Inserts apps if dont exists
-        Map<String,String> apps = dbCont.getAppList();
-        String appName = "";
-
-        for (String appId: apps.keySet()) {
-            appName = apps.get(appId);
-            //Reads a list of commits ordered by date
-            //Inserts commits into apks if they dont exists.
-            for (String commitGUID: dbCont.getApkList(appId)){
+        ArrayList<String> apps = dbCont.getAppList();
+        for (String appName: apps) {
+            for (String commitGUID: dbCont.getApkList(appName)) {
                 File appDir = new File(apkDir, appName + "/"+commitGUID);
                 if (appDir.exists()) {
+                    parentDirectory = appDir;
+                    System.out.println("Analyzing "+ appDir + " ...");
                     traverseManifests(appDir, commitGUID, dbCont, timestamp);
                     traverseSrcCode(commitGUID, appDir, timestamp, dbCont);
                 }
             }
         }
-
-/*
-        for(String apkName : apks){
-            dbCont.addApkToList(apkName);
-
-            File appDir = new File(apkDir, apkName + "/app");
-            analyzeManifest(appDir, apkName, dbCont, timestamp);
-
-            File srcCodeDir = new File(appDir, "src"); //"src/android/support/v4"
-            traverseSrcCode(apkName, srcCodeDir, timestamp, dbCont);
-        }*/
 
         HashMap<String, ArrayList<String>> latestResults = dbCont.getLatestResults();
 
@@ -132,11 +112,11 @@ public class analyzer {
         else if (currentDir.isFile()) {
             if (currentDir.getName().endsWith(".java")){
                 String fileName = currentDir.getName();
-
                 HashMap<String, String> fileRationaleCalls = getRationaleCalls(currentDir, currentDir.getName());
                 if(fileRationaleCalls != null){
                     for(String lineNum : fileRationaleCalls.keySet()){
-                        dbCont.insertReport(apkID, 1, fileName, Integer.parseInt(lineNum), timestamp);
+                        String methodName = fileRationaleCalls.get(lineNum);
+                        dbCont.insertReport(apkID, 1, fileName, methodName, Integer.parseInt(lineNum), timestamp);
                     }
                 }
 
@@ -147,17 +127,23 @@ public class analyzer {
                     ArrayList<Integer> reqsCalled = new ArrayList<Integer>();
 
                     for(String lineNum: fileRequestCalls.keySet()){
+
                         int line = Integer.parseInt(lineNum);
                         reqsCalled.add(line);
-//                        System.out.println("#############################################################");
-//                        System.out.println(fileName);
-//                        System.out.println("#############################################################");
-                        HashMap<String, String> outerFileCheckPermCalls = getOuterSelfPermsCalls(currentDir, apkName, line);
 
-                        if(fileCheckPermCalls == null && outerFileCheckPermCalls.isEmpty()) {
-                            dbCont.insertReport(apkID, 5, fileName, line, timestamp);
-                        } else{
-                            dbCont.insertReport(apkID, 6, fileName, line, timestamp);
+                        String methodCombination=fileRequestCalls.get(lineNum);
+
+                        String methodName = methodCombination.split(",")[0];
+
+                        if (fileCheckPermCalls == null) {
+                            HashMap<String, String> outerFileCheckPermCalls = getOuterSelfPermsCalls(currentDir, apkName, line,methodCombination.split(",")[1]);
+                            if (outerFileCheckPermCalls.isEmpty()) {
+                                dbCont.insertReport(apkID, 5, fileName, methodName, line, timestamp);
+                            } else {
+                                dbCont.insertReport(apkID, 6, fileName, methodName, line, timestamp);
+                            }
+                        } else {
+                            dbCont.insertReport(apkID, 6, fileName, methodName, line, timestamp);
                         }
                     }
 
@@ -168,7 +154,8 @@ public class analyzer {
                                 || reqsCalled.contains(calls-2)
                                 || reqsCalled.contains(calls+3)
                                 || reqsCalled.contains(calls-3)){
-                            dbCont.insertReport(apkID, 7, fileName, calls, timestamp);
+                            String methodName = fileRequestCalls.get(String.valueOf(calls)).split(",")[0];
+                            dbCont.insertReport(apkID, 7, fileName, methodName, calls, timestamp);
                         }
                     }
                 }
@@ -219,7 +206,7 @@ public class analyzer {
                 if (!foundIt) {
                     int apkID = dbCont.getApkID(apkName);
                     //17: Manifest not identified, manually verification needed
-                    dbCont.insertReport(apkID, 17, "AndroidManifest.xml", -1, timestamp);
+                    dbCont.insertReport(apkID, 17, "AndroidManifest.xml", "",-1, timestamp);
                 }
             } else {
                 // Analyze manifest if there is only one found
@@ -232,7 +219,7 @@ public class analyzer {
     /*
     Searches AndroidManifest.xml files
     */
-    public void analyzeManifest(File manifest, String apkName, sqliteDBController dbCont, String timestamp){
+    private void analyzeManifest(File manifest, String apkName, sqliteDBController dbCont, String timestamp){
         //File manifest = new File(projectDir, "/AndroidManifest.xml");
         int apkID = dbCont.getApkID(apkName);
 
@@ -255,20 +242,20 @@ public class analyzer {
                     if(sdkMax != null){
                         int maxVersion = Integer.parseInt(sdkMax.getNodeValue());
                         if(minVersion < 23 && maxVersion >=23){
-                            dbCont.insertReport(apkID, 14, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 14, "AndroidManifest.xml", "", -1, timestamp);
                         }
                         else if(maxVersion < 23){
-                            dbCont.insertReport(apkID, 15, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 15, "AndroidManifest.xml", "", -1, timestamp);
                         }
                         else if(minVersion >= 23){
-                            dbCont.insertReport(apkID, 16, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 16, "AndroidManifest.xml", "", -1, timestamp);
                         }
                     }
                 }
                 if(sdkMax != null){
                     int maxVersion = Integer.parseInt(sdkMax.getNodeValue());
                     if(maxVersion < 23){
-                        dbCont.insertReport(apkID, 15, "AndroidManifest.xml", -1, timestamp);
+                        dbCont.insertReport(apkID, 15, "AndroidManifest.xml", "", -1, timestamp);
                     }
                 }
             }
@@ -277,13 +264,13 @@ public class analyzer {
                 String permName = perm.getAttributes().getNamedItem("android:name").getNodeValue();
 
                 if(permName.compareTo("android.permission.CAMERA")==0){
-                    dbCont.insertReport(apkID, 2, "AndroidManifest.xml", -1, timestamp);
+                    dbCont.insertReport(apkID, 2, "AndroidManifest.xml", "", -1, timestamp);
                 }
                 else if(permName.compareTo("android.permission.SEND_SMS")==0){
-                    dbCont.insertReport(apkID, 3, "AndroidManifest.xml", -1, timestamp);
+                    dbCont.insertReport(apkID, 3, "AndroidManifest.xml", "", -1, timestamp);
                 }
                 else if(permName.compareTo("android.permission.CALL_PHONE")==0){
-                    dbCont.insertReport(apkID, 4, "AndroidManifest.xml", -1, timestamp);
+                    dbCont.insertReport(apkID, 4, "AndroidManifest.xml", "", -1, timestamp);
                 }
 
 
@@ -293,20 +280,20 @@ public class analyzer {
                     int minVersion = Integer.parseInt(sdkMinVersion.getNodeValue());
 
                     if(minVersion >= 23){
-                        dbCont.insertReport(apkID, 11, "AndroidManifest.xml", -1, timestamp);
+                        dbCont.insertReport(apkID, 11, "AndroidManifest.xml", "", -1, timestamp);
                     }
                     else if(sdkMaxVersion != null){
                         int maxVersion = Integer.parseInt(sdkMaxVersion.getNodeValue());
                         if(minVersion < 23 && maxVersion >= 23){
-                            dbCont.insertReport(apkID, 10, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 10, "AndroidManifest.xml", "", -1, timestamp);
                         }
                         else if(maxVersion < 23){
-                            dbCont.insertReport(apkID, 12, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 12, "AndroidManifest.xml", "", -1, timestamp);
                         }
                     }
                     else{
                         if(minVersion < 23){
-                            dbCont.insertReport(apkID, 9, "AndroidManifest.xml", -1, timestamp);
+                            dbCont.insertReport(apkID, 9, "AndroidManifest.xml", "", -1, timestamp);
                         }
                     }
                 }
@@ -315,10 +302,10 @@ public class analyzer {
                     int maxVersion = Integer.parseInt(sdkMaxVersion.getNodeValue());
 
                     if(maxVersion < 23){
-                        dbCont.insertReport(apkID, 12, "AndroidManifest.xml", -1, timestamp);
+                        dbCont.insertReport(apkID, 12, "AndroidManifest.xml", "", -1, timestamp);
                     }
                     else if(maxVersion >=23){
-                        dbCont.insertReport(apkID, 13, "AndroidManifest.xml", -1, timestamp);
+                        dbCont.insertReport(apkID, 13, "AndroidManifest.xml", "", -1, timestamp);
                     }
                 }
 
@@ -327,7 +314,7 @@ public class analyzer {
             for(int y=0; y<customPerms.getLength(); y++){
                 Node customPerm = customPerms.item(y);
                 String customName = customPerm.getAttributes().getNamedItem("android:name").getNodeValue();
-                dbCont.insertReport(apkID, 8, customName, -1, timestamp);
+                dbCont.insertReport(apkID, 8, "AndroidManifest.xml", "",-1, timestamp);
             }
 
         }
@@ -348,6 +335,7 @@ public class analyzer {
             in.close();
 
             getRationaleCallsVisitor grc = new getRationaleCallsVisitor();
+            grc.compilationUnit = cu;
             grc.visit(cu, fileName);
 
             if(grc.foundInstance){
@@ -356,7 +344,7 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){System.out.println("getRationaleCalls syntax error");}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getRationaleCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);
         }
         return null;
@@ -367,6 +355,7 @@ public class analyzer {
     JavaParser visitor for finding specific method calls
      */
     public class getRationaleCallsVisitor extends VoidVisitorAdapter{
+        public CompilationUnit compilationUnit;
         private HashMap<String, String> fileRationaleMap = new HashMap<String, String>();
         private boolean foundInstance = false;
 
@@ -377,8 +366,8 @@ public class analyzer {
                 if(!foundInstance){
                     foundInstance = true;
                 }
-
-                fileRationaleMap.put(String.valueOf(n.getBegin().line), n.getName());
+                String methodName = getMethodName(compilationUnit, n);
+                fileRationaleMap.put(String.valueOf(n.getBegin().line), methodName);
             }
             super.visit(n, arg);
         }
@@ -396,13 +385,14 @@ public class analyzer {
             in.close();
 
             getRequestPermsVisitor grp = new getRequestPermsVisitor();
+            grp.compilationUnit = cu;
             grp.visit(cu, fileName);
             if(grp.foundInstance){
                 return grp.fileRequestMap;
             }
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){System.out.println("getRequestPermsCalls syntax error");}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getRequestPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
 
         return null;
@@ -412,31 +402,33 @@ public class analyzer {
     JavaParser visitor that searches source code for specific method calls
      */
     public class getRequestPermsVisitor extends VoidVisitorAdapter{
+        public CompilationUnit compilationUnit;
         private HashMap<String, String> fileRequestMap = new HashMap<String, String>();
         private boolean foundInstance = false;
 
         @Override
-        public void visit(MethodCallExpr n, Object arg){
-            if(n.getName().compareTo("requestPermissions")==0){
+        public void visit(final MethodCallExpr callExpr, Object arg){
+            if(callExpr.getName().compareTo("requestPermissions")==0){
                 if(!foundInstance){
                     foundInstance = true;
                 }
 
-                fileRequestMap.put(String.valueOf(n.getBegin().line), n.getName());
+                String methodName = getMethodName(compilationUnit, callExpr);
+                fileRequestMap.put(String.valueOf(callExpr.getBegin().line), methodName);
             }
 
-            super.visit(n, arg);
+            super.visit(callExpr, arg);
         }
     }
 
     /*
     Checks when requestPermission is called within another source code
     */
-    public HashMap<String, String> getOuterSelfPermsCalls(final File projectDir, String apkName, final int permReqLineNum) {
+    public HashMap<String, String> getOuterSelfPermsCalls(final File projectDir, String apkName, final int permReqLineNum, String methodLine) {
 //        System.out.println("Analyzing  Outer SelfPermsCalls *************************************** ");
 
         final HashMap<String, String> fileCheckSelfMap = new HashMap<String, String>();
-        final int searchLimitLine = permReqLineNum - 20;
+        final int searchLimitLine = permReqLineNum - Integer.parseInt(methodLine);
         FileInputStream in;
 
         try {
@@ -444,7 +436,6 @@ public class analyzer {
             final CompilationUnit cu = JavaParser.parse(in);
             final List<ImportDeclaration> cuImports = cu.getImports();
             in.close();
-//            final File srcCodeDir = new File(parentDirectory, apkName + "/app/src");
 
             (new VoidVisitorAdapter<Object>() {
                 @Override
@@ -465,7 +456,7 @@ public class analyzer {
                                         if (innerFile.exists()) {
                                             //System.out.println("Found Class == " + innerFile.getAbsolutePath());
                                             try {
-                                                CompilationUnit innerCU = JavaParser.parse(innerFile);
+                                                final CompilationUnit innerCU = JavaParser.parse(innerFile);
                                                 (new VoidVisitorAdapter<Object>() {
                                                     @Override
                                                     public void visit(MethodDeclaration mDeclaration, Object arg) {
@@ -495,7 +486,7 @@ public class analyzer {
             }).visit(cu, null);
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){System.out.println("getOuterSelfPermsCalls syntax error");}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getOuterSelfPermsCalls syntax error " +  projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
 
 //        System.out.println("END Analyzing  Outer SelfPermsCalls ***************************************");
@@ -516,6 +507,7 @@ public class analyzer {
             in.close();
 
             getSelfPermsVisitor gsp = new getSelfPermsVisitor();
+            gsp.compilationUnit = cu;
             gsp.visit(cu, fileName);
             if(gsp.foundInstance){
                 return gsp.fileCheckSelfMap;
@@ -523,7 +515,7 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch(ParseException pe){System.out.println("getSelfPermsCalls syntax error");}//ignore, since it's the app developer's fault
+        catch(ParseException pe){System.out.println("getSelfPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
 
         return null;
@@ -533,6 +525,7 @@ public class analyzer {
     JavaParser visitor for finding method declarations
      */
     public class getSelfPermsVisitor extends VoidVisitorAdapter{
+        public CompilationUnit compilationUnit;
         private HashMap<String, String> fileCheckSelfMap = new HashMap<String, String>();
         private boolean foundInstance = false;
 
@@ -542,11 +535,30 @@ public class analyzer {
                 if(!foundInstance){
                     foundInstance = true;
                 }
-                fileCheckSelfMap.put(String.valueOf(n.getBegin().line), n.getName());
+                String methodName = getMethodName(compilationUnit, n);
+                fileCheckSelfMap.put(String.valueOf(n.getBegin().line), methodName);
             }
 
             super.visit(n, arg);
         }
+    }
+
+    private String getMethodName(CompilationUnit compilationUnit, final MethodCallExpr callExpr) {
+        final String[] methodName = {""}; // Necesary in order to have the final attribute >_<
+        // Evaluate the CompilationUnit, now searching for the methods' definitions to identify the parent
+        (new VoidVisitorAdapter<Object>() {
+            @Override
+            public void visit(MethodDeclaration declExpr, Object arg) {
+                super.visit(declExpr, arg);
+
+                //System.out.println("[L:"+n.getBegin().line+"] " + n.getName());
+                if (declExpr.getBegin().line < callExpr.getBegin().line)
+                    methodName[0] = declExpr.getName()+","+declExpr.getBegin().line;
+                else
+                    return;
+            }
+        }).visit(compilationUnit, null);
+        return methodName[0];
     }
 
     /*
@@ -593,9 +605,8 @@ public class analyzer {
             String timestamp = df.format(lastRun);
 
             analyzer newAnalyzer = new analyzer();
-            newAnalyzer.parentDirectory = new File( args[0] );
 
-            newAnalyzer.traverseApks(newAnalyzer.parentDirectory, timestamp, dbCont);
+            newAnalyzer.traverseApks(new File( args[0] ), timestamp, dbCont);
         }
         finally{
             try{
