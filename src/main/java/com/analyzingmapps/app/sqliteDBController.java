@@ -19,7 +19,8 @@ public class sqliteDBController {
         Class.forName("org.sqlite.JDBC");
 
         try{
-            dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:../VirginiaProjects/android-dataset-small.sqlite");
+            dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:android-dataset.sqlite");
+            //"jdbc:sqlite:../VirginiaProjects/android-dataset-small.sqlite"
             //"jdbc:sqlite:../osara/Tags-InProgress/database.sqlite"
             dbPLintResultConnection = DriverManager.getConnection("jdbc:sqlite:results.sqlite");//"jdbc:sqlite:../results" "jdbc:sqlite:results");
             dbPLintResultConnection.setAutoCommit(false);

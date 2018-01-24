@@ -17,6 +17,8 @@ import org.w3c.dom.NodeList;
 import org.w3c.dom.Node;
 
 import org.w3c.dom.Document;
+
+import javax.activation.UnsupportedDataTypeException;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.text.SimpleDateFormat;
@@ -33,7 +35,8 @@ public class analyzer {
     public void traverseApks(File apkDir, String timestamp, sqliteDBController dbCont){
         ArrayList<String> apps = dbCont.getAppList();
         for (String appName: apps) {
-            for (String commitGUID: dbCont.getApkList(appName)) {
+            ArrayList<String> apkList = dbCont.getApkList(appName); // List of commits per App
+            for (String commitGUID: apkList) {
                 File appDir = new File(apkDir, appName + "/"+commitGUID);
                 if (appDir.exists()) {
                     parentDirectory = appDir;
@@ -344,9 +347,10 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+        catch (UnsupportedOperationException e) {System.out.println("getRationaleCalls syntax error");} //ignore, since it's the app developer's fault
         catch(ParseException pe){System.out.println("getRationaleCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
-        catch(IOException ioe){System.out.println(ioe);
-        }
+        catch(IOException ioe){System.out.println(ioe);}
+        catch(Exception e) {System.out.println("Something went wrong parsing getRationaleCalls " + projectDir);}
         return null;
     }
 
@@ -358,6 +362,7 @@ public class analyzer {
         public CompilationUnit compilationUnit;
         private HashMap<String, String> fileRationaleMap = new HashMap<String, String>();
         private boolean foundInstance = false;
+
 
         @Override
         public void visit(MethodCallExpr n, Object arg){
@@ -392,8 +397,10 @@ public class analyzer {
             }
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+        catch (UnsupportedOperationException e) {System.out.println("getRequestPermsCalls syntax error");} //ignore, since it's the app developer's fault
         catch(ParseException pe){System.out.println("getRequestPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
+        catch(Exception e) {System.out.println("Something went wrong parsing getRequestPermsCalls " + projectDir);}
 
         return null;
     }
@@ -440,40 +447,47 @@ public class analyzer {
             (new VoidVisitorAdapter<Object>() {
                 @Override
                 public void visit(final MethodCallExpr methodCallExpr, Object arg) {
-                    // Search for the method calls that are 10 lines before the "requestPermissions" call
                     if (methodCallExpr.getBegin().line < permReqLineNum && methodCallExpr.getBegin().line > searchLimitLine) {
                         if (methodCallExpr.getScope() != null) {
                             for (ImportDeclaration itemImport : cuImports) {
-                                if (itemImport.getName().getName().equals(methodCallExpr.getScope().toString())) {
-                                    String fileName = itemImport.getName().getName().toString()  + ".java";
-                                    searchPathsFound = null;
-                                    searchPathsFound = new ArrayList<>();
-                                    search(parentDirectory, fileName);
+                                if (itemImport.getName() != null && methodCallExpr.getScope() != null) {
+                                    if (itemImport.getName().getName().equals(methodCallExpr.getScope().toString())) {
+                                        String fileName = itemImport.getName().getName().toString()  + ".java";
+                                        //System.out.println(fileName);
+                                        searchPathsFound = null;
+                                        searchPathsFound = new ArrayList<>();
+                                        search(parentDirectory, fileName);
 
-                                    if (searchPathsFound.size() > 0) {
-                                        File innerFile = searchPathsFound.get(0);
+                                        if (searchPathsFound.size() > 0) {
+                                            File innerFile = searchPathsFound.get(0);
 
-                                        if (innerFile.exists()) {
-                                            //System.out.println("Found Class == " + innerFile.getAbsolutePath());
-                                            try {
-                                                final CompilationUnit innerCU = JavaParser.parse(innerFile);
-                                                (new VoidVisitorAdapter<Object>() {
-                                                    @Override
-                                                    public void visit(MethodDeclaration mDeclaration, Object arg) {
-                                                        if (methodCallExpr.getName().equals(mDeclaration.getName())) {
-                                                            for (Statement stmt : mDeclaration.getBody().getStmts()) {
-                                                                if (stmt.toString().contains("checkSelfPermission")) {
-                                                                    fileCheckSelfMap.put(String.valueOf(mDeclaration.getBegin().line), mDeclaration.getName());
+                                            if (innerFile.exists()) {
+                                                //System.out.println("Found Class == " + innerFile.getAbsolutePath());
+                                                try {
+                                                    final CompilationUnit innerCU = JavaParser.parse(innerFile);
+                                                    (new VoidVisitorAdapter<Object>() {
+                                                        @Override
+                                                        public void visit(MethodDeclaration mDeclaration, Object arg) {
+                                                            if (methodCallExpr.getName() != null && mDeclaration.getName() != null) {
+                                                                if (methodCallExpr.getName().equals(mDeclaration.getName())) {
+                                                                    for (Statement stmt : mDeclaration.getBody().getStmts()) {
+                                                                        if (stmt.toString().contains("checkSelfPermission")) {
+                                                                            fileCheckSelfMap.put(String.valueOf(mDeclaration.getBegin().line), mDeclaration.getName());
+                                                                        }
+                                                                    }
                                                                 }
                                                             }
+
+                                                            super.visit(mDeclaration, arg);
                                                         }
-                                                        super.visit(mDeclaration, arg);
-                                                    }
-                                                }).visit(innerCU, null);
+                                                    }).visit(innerCU, null);
+                                                }
+                                                catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+                                                catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
+                                                catch(IOException ioe){System.out.println(ioe);}
+                                                catch(Exception pe){System.out.println("Something went wrong parsing getOuterSelfPermsCalls " + pe);}
+
                                             }
-                                            catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-                                            catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
-                                            catch(IOException ioe){System.out.println(ioe);}
                                         }
                                     }
                                 }
@@ -486,8 +500,10 @@ public class analyzer {
             }).visit(cu, null);
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+        catch (UnsupportedOperationException e) {System.out.println("getOuterSelfPermsCalls syntax error");} //ignore, since it's the app developer's fault
         catch(ParseException pe){System.out.println("getOuterSelfPermsCalls syntax error " +  projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
+        catch(Exception e) {System.out.println("Something went wrong parsing getOuterSelfPermsCalls " +  projectDir);}
 
 //        System.out.println("END Analyzing  Outer SelfPermsCalls ***************************************");
 //        System.out.println("Found " + fileCheckSelfMap);
@@ -515,8 +531,10 @@ public class analyzer {
 
         }
         catch(FileNotFoundException fnfe){System.out.println(fnfe);}
+        catch (UnsupportedOperationException e) {System.out.println("getSelfPermsCalls syntax error");} //ignore, since it's the app developer's fault
         catch(ParseException pe){System.out.println("getSelfPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
         catch(IOException ioe){System.out.println(ioe);}
+        catch(Exception e) {System.out.println("Something went wrong parsing getSelfPermsCalls " + projectDir);}
 
         return null;
     }
