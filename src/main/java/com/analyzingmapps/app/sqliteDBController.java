@@ -338,4 +338,17 @@ public class sqliteDBController {
         return results;
     }
 
+    public void insertLog(String appName,String commit, String path, String errorMessage, String pLintMethod) {
+
+        try {
+            Statement stmt = dbPLintResultConnection.createStatement();
+            String sql = "INSERT INTO error_log (app_name, apk_id, file_path, error_message, plint_method_name) " +
+                    "VALUES (\"" + appName + "\", \"" + commit + "\", \"" + path + "\", '" + errorMessage + "', \"" + pLintMethod + "\")";
+            stmt.executeUpdate(sql);
+            dbPLintResultConnection.commit();
+            stmt.close();
+        } catch ( Exception e ) {
+            System.err.println( e.getClass().getName() + ": " + e.getMessage() );
+        }
+    }
 }

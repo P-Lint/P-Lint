@@ -29,6 +29,10 @@ import java.text.SimpleDateFormat;
  */
 public class analyzer {
     File parentDirectory;
+    String currentAppName;
+    String currentCommitGUID;
+    static sqliteDBController databaseController;
+
     /*
     Goes through folder of decompiled APK's
      */
@@ -40,6 +44,8 @@ public class analyzer {
                 File appDir = new File(apkDir, appName + "/"+commitGUID);
                 if (appDir.exists()) {
                     parentDirectory = appDir;
+                    currentAppName = appName;
+                    currentCommitGUID = commitGUID;
                     System.out.println("Analyzing "+ appDir + " ...");
                     traverseManifests(appDir, commitGUID, dbCont, timestamp);
                     traverseSrcCode(commitGUID, appDir, timestamp, dbCont);
@@ -321,8 +327,14 @@ public class analyzer {
             }
 
         }
-        catch(IOException ioe){System.out.println("Could not read AndroidManifest.xml for " + manifest.getPath());}
-        catch(Exception e){System.out.println("Something went wrong parsing the Android Manifest XML: " + e);}
+        catch(IOException ioe){
+            System.out.println("Could not read AndroidManifest.xml for " + manifest.getPath());
+            logError(manifest.getPath(), ioe.getMessage(), "analyzeManifest");
+        }
+        catch(Exception e){
+            System.out.println("Something went wrong parsing the Android Manifest XML: " + e);
+            logError(manifest.getPath(), e.getMessage(), "analyzeManifest");
+        }
     }
 
 
@@ -346,11 +358,26 @@ public class analyzer {
             }
 
         }
-        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch (UnsupportedOperationException e) {System.out.println("getRationaleCalls syntax error");} //ignore, since it's the app developer's fault
-        catch(ParseException pe){System.out.println("getRationaleCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
-        catch(IOException ioe){System.out.println(ioe);}
-        catch(Exception e) {System.out.println("Something went wrong parsing getRationaleCalls " + projectDir);}
+        catch(FileNotFoundException fnfe){
+            System.out.println(fnfe);
+            logError(projectDir.getPath(), fnfe.getMessage(), "getRationaleCalls");
+        }
+        catch (UnsupportedOperationException e) {
+            System.out.println("getRationaleCalls syntax error");
+            logError(projectDir.getPath(), e.getMessage(), "getRationaleCalls");
+        } //ignore, since it's the app developer's fault
+        catch(ParseException pe){
+            System.out.println("getRationaleCalls syntax error " + projectDir);
+            logError(projectDir.getPath(), pe.getMessage(), "getRationaleCalls");
+        }//ignore, since it's the app developer's fault
+        catch(IOException ioe){
+            System.out.println(ioe);
+            logError(projectDir.getPath(), ioe.getMessage(), "getRationaleCalls");
+        }
+        catch(Exception e) {
+            System.out.println("Something went wrong parsing getRationaleCalls " + projectDir);
+            logError(projectDir.getPath(), e.getMessage(), "getRationaleCalls");
+        }
         return null;
     }
 
@@ -396,11 +423,26 @@ public class analyzer {
                 return grp.fileRequestMap;
             }
         }
-        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch (UnsupportedOperationException e) {System.out.println("getRequestPermsCalls syntax error");} //ignore, since it's the app developer's fault
-        catch(ParseException pe){System.out.println("getRequestPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
-        catch(IOException ioe){System.out.println(ioe);}
-        catch(Exception e) {System.out.println("Something went wrong parsing getRequestPermsCalls " + projectDir);}
+        catch(FileNotFoundException fnfe){
+            System.out.println(fnfe);
+            logError(projectDir.getPath(), fnfe.getMessage(), "getRequestPermsCalls");
+        }
+        catch (UnsupportedOperationException e) {
+            System.out.println("getRequestPermsCalls syntax error");
+            logError(projectDir.getPath(), e.getMessage(), "getRequestPermsCalls");
+        } //ignore, since it's the app developer's fault
+        catch(ParseException pe){
+            System.out.println("getRequestPermsCalls syntax error " + projectDir);
+            logError(projectDir.getPath(), pe.getMessage(), "getRequestPermsCalls");
+        }//ignore, since it's the app developer's fault
+        catch(IOException ioe){
+            System.out.println(ioe);
+            logError(projectDir.getPath(), ioe.getMessage(), "getRequestPermsCalls");
+        }
+        catch(Exception e) {
+            System.out.println("Something went wrong parsing getRequestPermsCalls " + projectDir);
+            logError(projectDir.getPath(), e.getMessage(), "getRequestPermsCalls");
+        }
 
         return null;
     }
@@ -482,11 +524,10 @@ public class analyzer {
                                                         }
                                                     }).visit(innerCU, null);
                                                 }
-                                                catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-                                                catch(ParseException pe){System.out.println(" MethodDeclaration syntax error " + pe);}
-                                                catch(IOException ioe){System.out.println(ioe);}
-                                                catch(Exception pe){System.out.println("Something went wrong parsing getOuterSelfPermsCalls " + pe);}
-
+                                                catch(Exception e) {
+                                                    System.out.println("Something went wrong parsing getOuterSelfPermsCalls " + projectDir);
+                                                    logError(projectDir.getPath(), e.getMessage(), "getOuterSelfPermsCalls");
+                                                }
                                             }
                                         }
                                     }
@@ -499,11 +540,26 @@ public class analyzer {
                 }
             }).visit(cu, null);
         }
-        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch (UnsupportedOperationException e) {System.out.println("getOuterSelfPermsCalls syntax error");} //ignore, since it's the app developer's fault
-        catch(ParseException pe){System.out.println("getOuterSelfPermsCalls syntax error " +  projectDir);}//ignore, since it's the app developer's fault
-        catch(IOException ioe){System.out.println(ioe);}
-        catch(Exception e) {System.out.println("Something went wrong parsing getOuterSelfPermsCalls " +  projectDir);}
+        catch(FileNotFoundException fnfe){
+            System.out.println(fnfe);
+            logError(projectDir.getPath(), fnfe.getMessage(), "getOuterSelfPermsCalls");
+        }
+        catch (UnsupportedOperationException e) {
+            System.out.println("getOuterSelfPermsCalls syntax error");
+            logError(projectDir.getPath(), e.getMessage(), "getOuterSelfPermsCalls");
+        } //ignore, since it's the app developer's fault
+        catch(ParseException pe){
+            System.out.println("getOuterSelfPermsCalls syntax error " + projectDir);
+            logError(projectDir.getPath(), pe.getMessage(), "getOuterSelfPermsCalls");
+        }//ignore, since it's the app developer's fault
+        catch(IOException ioe){
+            System.out.println(ioe);
+            logError(projectDir.getPath(), ioe.getMessage(), "getOuterSelfPermsCalls");
+        }
+        catch(Exception e) {
+            System.out.println("Something went wrong parsing getOuterSelfPermsCalls " + projectDir);
+            logError(projectDir.getPath(), e.getMessage(), "getOuterSelfPermsCalls");
+        }
 
 //        System.out.println("END Analyzing  Outer SelfPermsCalls ***************************************");
 //        System.out.println("Found " + fileCheckSelfMap);
@@ -530,11 +586,26 @@ public class analyzer {
             }
 
         }
-        catch(FileNotFoundException fnfe){System.out.println(fnfe);}
-        catch (UnsupportedOperationException e) {System.out.println("getSelfPermsCalls syntax error");} //ignore, since it's the app developer's fault
-        catch(ParseException pe){System.out.println("getSelfPermsCalls syntax error " + projectDir);}//ignore, since it's the app developer's fault
-        catch(IOException ioe){System.out.println(ioe);}
-        catch(Exception e) {System.out.println("Something went wrong parsing getSelfPermsCalls " + projectDir);}
+        catch(FileNotFoundException fnfe){
+            System.out.println(fnfe);
+            logError(projectDir.getPath(), fnfe.getMessage(), "getSelfPermsCalls");
+        }
+        catch (UnsupportedOperationException e) {
+            System.out.println("getSelfPermsCalls syntax error");
+            logError(projectDir.getPath(), e.getMessage(), "getSelfPermsCalls");
+        } //ignore, since it's the app developer's fault
+        catch(ParseException pe){
+            System.out.println("getSelfPermsCalls syntax error " + projectDir);
+            logError(projectDir.getPath(), pe.getMessage(), "getSelfPermsCalls");
+        }//ignore, since it's the app developer's fault
+        catch(IOException ioe){
+            System.out.println(ioe);
+            logError(projectDir.getPath(), ioe.getMessage(), "getSelfPermsCalls");
+        }
+        catch(Exception e) {
+            System.out.println("Something went wrong parsing getSelfPermsCalls " + projectDir);
+            logError(projectDir.getPath(), e.getMessage(), "getSelfPermsCalls");
+        }
 
         return null;
     }
@@ -602,6 +673,9 @@ public class analyzer {
 
     }
 
+    private void logError(String path, String errorMessage, String pLintMethod) {
+        databaseController.insertLog(currentAppName, currentCommitGUID, path, errorMessage, pLintMethod);
+    }
 
     // args[0] points to relative decompiled apk path: "./apk-decompiler/uncompressed-apks"
     public static void main(String[] args){
@@ -611,6 +685,7 @@ public class analyzer {
         sqliteDBController dbCont = new sqliteDBController();
         try{
             dbCont.connectToDB();
+            databaseController = dbCont;
         }
         catch(Exception e){
             System.out.print("Issues connecting to results database: \n" + e);
@@ -630,6 +705,7 @@ public class analyzer {
             try{
                 dbCont.dbPLintResultConnection.close();
                 dbCont.dbAppsDatasetConnection.close();
+                databaseController = null;
             }
             catch(SQLException se) {
                 System.out.print(se);
