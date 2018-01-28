@@ -1,9 +1,13 @@
 package com.analyzingmapps.app;
 
 import java.sql.*;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.TimeZone;
 
 
 /**
@@ -13,10 +17,16 @@ public class sqliteDBController {
     //The db connection that allows for reads/updates
     public Connection dbPLintResultConnection = null;
     public Connection dbAppsDatasetConnection = null;
+    String timestamp;
 
     //Establishes connection to database that exists in same directory
     public void connectToDB() throws ClassNotFoundException{
         Class.forName("org.sqlite.JDBC");
+
+        DateFormat df = new SimpleDateFormat("MM/dd/yyyy HH:mm:ss");
+        df.setTimeZone(TimeZone.getTimeZone("UTC"));
+        Date lastRun = new Date();
+        timestamp = df.format(lastRun);
 
         try{
             dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:android-dataset.sqlite");
@@ -209,6 +219,10 @@ public class sqliteDBController {
             System.out.println("[Error getting Use Cases]: " + se);
         }
         return useCaseInfo;
+    }
+
+    public void insertReport(int apkID, int usecaseID, String fileName, String methodName, int lineFound) {
+        insertReport(apkID, usecaseID, fileName, methodName, lineFound, timestamp);
     }
 
     public void insertReport(int apkID, int usecaseID, String fileName, String methodName, int lineFound, String time) {
