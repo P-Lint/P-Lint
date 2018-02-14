@@ -2,16 +2,13 @@ package com.analyzingmapps.app;
 
 import java.io.*;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.sql.SQLException;
 import java.util.*;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
-import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
-import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Node;
@@ -26,109 +23,12 @@ import java.util.concurrent.TimeUnit;
  * Created by Colton Dennis on 10/4/16.
  * Refactored by Virginia Pujols 01/20/2018
  */
-public class analyzer {
+public class Analyzer {
     private static sqliteDBController databaseController;
     private static String MANIFEST_FILE = "AndroidManifest.xml";
     private String currentAppName;
     private String currentCommitGUID;
     private Path currentCommitDirectory;
-
-    private class MyFileVisitor extends SimpleFileVisitor<Path> {
-        private PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:*.java");
-        private PathMatcher matcherByOneFile;
-        private List<Path> foundManifests = new ArrayList<>();
-        private String fileName;
-
-        Path foundPath;
-
-        MyFileVisitor() { }
-
-        MyFileVisitor(String fileName) {
-            this.fileName = fileName;
-        }
-
-        private boolean shouldSkip(Path path) {
-            return path.getFileName().toString().matches("^.*?(bin|androidTest|test|lib|debug|fdroid|build|gradle|res).*$");
-        }
-
-        @Override
-        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-            if (shouldSkip(dir)) {
-                return FileVisitResult.SKIP_SUBTREE;
-            }
-            //System.out.println("DIR -> " + dir.toAbsolutePath());
-            return FileVisitResult.CONTINUE;
-        }
-
-        @Override
-        public FileVisitResult visitFile(Path filePath, BasicFileAttributes attrs) throws IOException {
-            if (fileName != null && fileName.equals(filePath.getFileName())) {
-                //System.out.println("ONE FILE -> " + filePath.getFileName());
-                foundPath = filePath;
-                return FileVisitResult.TERMINATE;
-
-            } else if (matcher.matches(filePath.getFileName())) { //Analyze all *.java
-
-                //System.out.println("JAVA FILE -> " + filePath.getFileName());
-                analyzer.this.analyzeSourceCode(filePath);
-
-            } else if (filePath.getFileName().toString().equals(MANIFEST_FILE)) {
-
-                //System.out.println("XML FILE -> " + filePath.getFileName());
-                foundManifests.add(filePath);
-
-            }
-            return FileVisitResult.CONTINUE;
-        }
-
-        List<Path> getFoundManifests() {
-            return foundManifests;
-        }
-
-    }
-
-    private class MyFileParserVisitor extends VoidVisitorAdapter {
-        CompilationUnit compilationUnit;
-        HashMap<String, String> shouldRequestPermissionCalls = new HashMap<>();
-        HashMap<String, String> checkSelfPermissionCalls = new HashMap<>();
-        HashMap<String, String> requestPermissionsCalls = new HashMap<>();
-
-        @Override
-        public void visit(MethodCallExpr n, Object arg) {
-            super.visit(n, arg);
-
-            String methodName = getMethodName(compilationUnit, n);
-            String beginLine = String.valueOf(n.getBegin().get().line);
-            if(n.getNameAsString().compareTo("shouldShowRequestPermissionRationale") == 0){
-                shouldRequestPermissionCalls.put(beginLine, methodName);
-            }
-            if(n.getNameAsString().compareTo("checkSelfPermission") == 0){
-                checkSelfPermissionCalls.put(beginLine, methodName);
-            }
-            if(n.getNameAsString().compareTo("requestPermissions") == 0){
-                requestPermissionsCalls.put(String.valueOf(beginLine), methodName);
-            }
-
-        }
-
-        private String getMethodName(CompilationUnit compilationUnit, final MethodCallExpr callExpr) {
-            final String[] methodName = {""}; // Necessary in order to have the final keyword  >_<
-            // Evaluate the CompilationUnit, now searching for the methods' definitions to identify the parent
-            (new VoidVisitorAdapter<Object>() {
-                @Override
-                public void visit(MethodDeclaration declExpr, Object arg) {
-                    super.visit(declExpr, arg);
-
-                    //System.out.println("[L:"+n.getBegin().line+"] " + n.getName());
-                    if (declExpr.getBegin().get().line < callExpr.getBegin().get().line) {
-                        methodName[0] = declExpr.getName() + "," + declExpr.getBegin().get().line;
-                    }
-                }
-            }).visit(compilationUnit, null);
-            return methodName[0];
-        }
-
-    }
 
     private void traverseApps(Path directory) {
         ArrayList<String> apps = databaseController.getAppList();
@@ -136,7 +36,7 @@ public class analyzer {
             currentAppName = appName;
 
             if (!Files.exists(Paths.get(directory.toString(), appName))) {
-                continue; // Move to the next app to analyze
+                continue; // File not exists, Move to the next app to analyze
             }
 
             //TODO: Find a way to optimize commits select if possible.
@@ -149,11 +49,16 @@ public class analyzer {
                 if (Files.exists(projectPath)) {
                     System.out.println("Analyzing " + projectPath);
                     try {
-                        MyFileVisitor fileVisitor = new MyFileVisitor();
+                        MyFileSearcher fileVisitor = new MyFileSearcher(this);
                         Files.walkFileTree(projectPath, fileVisitor);
+
                         // Treat Manifests
                         List<Path> manifestList = fileVisitor.getFoundManifests();
                         analyzeManifest(commitGUID, manifestList);
+
+                        // Treat Source Code
+                        List<MyFileParserVisitor> filesList = fileVisitor.getJavaFiles();
+                        analyzeSourceCode(filesList);
 
                     } catch (IOException e) {
                         e.printStackTrace();
@@ -271,74 +176,108 @@ public class analyzer {
         }
     }
 
-    private void analyzeSourceCode(Path filePath) {
+    private void analyzeSourceCode(List<MyFileParserVisitor> filesList) {
         int commitID = databaseController.getApkID(currentCommitGUID);
-        String fileName = filePath.getFileName().toString();
-        File file = filePath.toFile();
 
-        try {
-            FileInputStream in = new FileInputStream(file);
-            CompilationUnit cu;
-            cu = JavaParser.parse(in);
-            in.close();
+        for (MyFileParserVisitor currentFileVisitor : filesList) {
+            try {
+                String fileName = currentFileVisitor.file.getName();
 
-            MyFileParserVisitor currentFileVisitor = new MyFileParserVisitor();
-            currentFileVisitor.compilationUnit = cu;
-            currentFileVisitor.visit(cu, fileName);
+                // Fist validate the calls of shouldRequestPermission
+                for(String lineNum : currentFileVisitor.shouldRequestPermissionCalls.keySet()){
+                    String methodName = currentFileVisitor.shouldRequestPermissionCalls.get(lineNum).split(",")[0];
+                    databaseController.insertReport(commitID, 1, fileName, methodName, Integer.parseInt(lineNum));
+                }
 
-            for(String lineNum : currentFileVisitor.shouldRequestPermissionCalls.keySet()){
-                String methodName = currentFileVisitor.shouldRequestPermissionCalls.get(lineNum).split(",")[0];
-                databaseController.insertReport(commitID, 1, fileName, methodName, Integer.parseInt(lineNum));
-            }
+                // Then, validate the calls of requestPermissions
+                ArrayList<Integer> requestCallLineNumbers = new ArrayList<>();
+                for(String lineNum: currentFileVisitor.requestPermissionsCalls.keySet()) {
+                    int requestPermissionCallLine = Integer.parseInt(lineNum);
+                    requestCallLineNumbers.add(requestPermissionCallLine);
 
-            ArrayList<Integer> requestCallLineNumbers = new ArrayList<>();
-            for(String lineNum: currentFileVisitor.requestPermissionsCalls.keySet()) {
-                int requestPermissionCallLine = Integer.parseInt(lineNum);
-                requestCallLineNumbers.add(requestPermissionCallLine);
+                    String methodCombination = currentFileVisitor.requestPermissionsCalls.get(lineNum);
+                    String methodName = methodCombination.split(",")[0];
+                    int methodNameLine = Integer.parseInt(methodCombination.split(",")[1]);
 
-                String methodCombination = currentFileVisitor.requestPermissionsCalls.get(lineNum);
-                String methodName = methodCombination.split(",")[0];
-                int methodNameLine = Integer.parseInt(methodCombination.split(",")[1]);
-
-                if (currentFileVisitor.checkSelfPermissionCalls.keySet().isEmpty()) {
-                    // If checkSelfPermission was not defined in current class, search for the call in the other project files
-                    HashMap<String, String> outerFileCheckPermCalls = getOuterSelfPermsCalls(file, requestPermissionCallLine, methodNameLine);
-                    if (outerFileCheckPermCalls.isEmpty()) {
-                        databaseController.insertReport(commitID, 5, fileName, methodName, requestPermissionCallLine);
+                    if (currentFileVisitor.checkSelfPermissionCalls.keySet().isEmpty()) {
+                        // If checkSelfPermission was not defined in current class, search for the call in the other project files
+                        HashMap<String, String> outerFileCheckPermCalls =
+                                getOuterSelfPermsCalls(currentFileVisitor.compilationUnit, filesList, requestPermissionCallLine, methodNameLine);
+                        if (outerFileCheckPermCalls.isEmpty()) {
+                            databaseController.insertReport(commitID, 5, fileName, methodName, requestPermissionCallLine);
+                        } else {
+                            databaseController.insertReport(commitID, 6, fileName, methodName, requestPermissionCallLine);
+                        }
                     } else {
                         databaseController.insertReport(commitID, 6, fileName, methodName, requestPermissionCallLine);
                     }
-                } else {
-                    databaseController.insertReport(commitID, 6, fileName, methodName, requestPermissionCallLine);
                 }
-            }
 
-            for(int calls: requestCallLineNumbers){
-                if(requestCallLineNumbers.contains(calls+1)
-                        || requestCallLineNumbers.contains(calls-1)
-                        || requestCallLineNumbers.contains(calls+2)
-                        || requestCallLineNumbers.contains(calls-2)
-                        || requestCallLineNumbers.contains(calls+3)
-                        || requestCallLineNumbers.contains(calls-3)){
+                // Validate the proximity of requestPermissions calls between each other
+                for(int calls: requestCallLineNumbers){
+                    if(requestCallLineNumbers.contains(calls+1)
+                            || requestCallLineNumbers.contains(calls-1)
+                            || requestCallLineNumbers.contains(calls+2)
+                            || requestCallLineNumbers.contains(calls-2)
+                            || requestCallLineNumbers.contains(calls+3)
+                            || requestCallLineNumbers.contains(calls-3)){
 
-                    String methodName = currentFileVisitor.requestPermissionsCalls.get(String.valueOf(calls)).split(",")[0];
-                    databaseController.insertReport(commitID, 7, fileName, methodName, calls);
+                        String methodName = currentFileVisitor.requestPermissionsCalls.get(String.valueOf(calls)).split(",")[0];
+                        databaseController.insertReport(commitID, 7, fileName, methodName, calls);
+                    }
                 }
-            }
 
-        } catch (Exception e) {
-            System.out.println("Something went wrong parsing " + file.getPath());
-            logError(file.getPath(), e.getMessage(), "analyzeSourceCode");
+            } catch (Exception e) {
+                System.out.println("Something went wrong parsing " + currentFileVisitor.file.getPath());
+                logError(currentFileVisitor.file.getPath(), e.getMessage(), "analyzeSourceCode");
+            }
         }
-
     }
 
-    /**
-     *
-     * Checks when requestPermission is called within another source code
-     * @return the combination of [line, method_name] of a found occurrence
-     */
-    private HashMap<String, String> getOuterSelfPermsCalls(final File currentFile, final int permissionCallLine, final int methodDefinitionLine) {
+    private HashMap<String, String> getOuterSelfPermsCalls(final CompilationUnit cu, final List<MyFileParserVisitor> parsedFiles, final int permissionCallLine, final int methodDefinitionLine) {
+        final HashMap<String, String> fileCheckSelfMap = new HashMap<>();
+
+        (new VoidVisitorAdapter<Object>() {
+            @Override
+            public void visit(MethodCallExpr methodCallExpr, Object arg) {
+                // First, evaluate if the current methodCallExpr is between the line in which the "permissionRequest" was called
+                // and the line where the method definition begins.
+                int currentSearchLine = methodCallExpr.getBegin().get().line;
+                if (currentSearchLine < permissionCallLine && currentSearchLine > methodDefinitionLine) {
+
+                    if (methodCallExpr.getScope().isPresent()) { // if the caller identifier is not null
+                        String caller = methodCallExpr.getScope().get().toString() + ".java";
+                        for (MyFileParserVisitor parsedFile : parsedFiles) {
+                            boolean foundFile = parsedFile.file.getName().equals(caller);
+                            boolean hasCheckSelfPermissionCalls = !parsedFile.checkSelfPermissionCalls.isEmpty();
+                            if (foundFile && hasCheckSelfPermissionCalls) {
+
+                                // Check the declarations to validate if method names matches
+                                for(String lineNum : parsedFile.checkSelfPermissionCalls.keySet()) {
+                                    String mDeclaration = parsedFile.checkSelfPermissionCalls.get(lineNum).split(",")[0];
+                                    boolean matches = methodCallExpr.getNameAsString().equals(mDeclaration);
+                                    if (matches) {
+                                        fileCheckSelfMap.put(lineNum, mDeclaration);
+                                        return; // I only need the first occurrence match
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                super.visit(methodCallExpr, arg);
+            }
+
+        }).visit(cu, null);
+        return fileCheckSelfMap;
+    }
+
+        /**
+         *
+         * Checks when requestPermission is called within another source code
+         * @return the combination of [line, method_name] of a found occurrence
+         */
+    private HashMap<String, String> getOuterSelfPermsCallsOld(final File currentFile, final int permissionCallLine, final int methodDefinitionLine) {
         final HashMap<String, String> fileCheckSelfMap = new HashMap<>();
         final int searchLimitLine = methodDefinitionLine;
         FileInputStream in;
@@ -359,9 +298,9 @@ public class analyzer {
                         if (methodCallExpr.getScope().isPresent()) {
                             for (ImportDeclaration itemImport : cuImports) {
                                 //Second, If the instance calling the method (methodCallExpr.getScope) is found in the Import, continue
-                                if (itemImport.getName().getIdentifier().equals(methodCallExpr.getScope().get().toString())) {
+                                    if (itemImport.getName().getIdentifier().equals(methodCallExpr.getScope().get().toString())) {
                                     String fileName = itemImport.getName().getIdentifier()  + ".java";
-
+                                    /*
                                     try {
                                         // Third, search for the specific file
                                         MyFileVisitor fileVisitor = new MyFileVisitor(fileName);
@@ -395,6 +334,7 @@ public class analyzer {
                                         System.out.println("Something went wrong parsing getOuterSelfPermsCalls " + currentFile.getPath());
                                         logError(currentFile.getPath(), e.getMessage(), "getOuterSelfPermsCalls");
                                     }
+                                    */
                                 }
                             }
                         }
@@ -413,7 +353,7 @@ public class analyzer {
         return fileCheckSelfMap;
     }
 
-    private void logError(String path, String errorMessage, String pLintMethod) {
+    public void logError(String path, String errorMessage, String pLintMethod) {
         databaseController.insertLog(currentAppName, currentCommitGUID, path, errorMessage, pLintMethod);
     }
 
@@ -429,7 +369,7 @@ public class analyzer {
         try {
             databaseController.connectToDB();
 
-            analyzer newAnalyzer = new analyzer();
+            Analyzer newAnalyzer = new Analyzer();
             newAnalyzer.traverseApps(startingPath);
 
         } catch (Exception e) {

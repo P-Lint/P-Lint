@@ -29,10 +29,11 @@ public class sqliteDBController {
         timestamp = df.format(lastRun);
 
         try{
-            dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:android-dataset.sqlite");
+            dbAppsDatasetConnection = DriverManager.getConnection("jdbc:sqlite:android-dataset48.sqlite");
             //"jdbc:sqlite:../VirginiaProjects/android-dataset-small.sqlite"
             //"jdbc:sqlite:../osara/Tags-InProgress/database.sqlite"
-            dbPLintResultConnection = DriverManager.getConnection("jdbc:sqlite:results.sqlite");//"jdbc:sqlite:../results" "jdbc:sqlite:results");
+            dbPLintResultConnection = DriverManager.getConnection("jdbc:sqlite:results48.sqlite");//"jdbc:sqlite:../results" "jdbc:sqlite:results");
+
             dbPLintResultConnection.setAutoCommit(false);
         }
         catch(SQLException se){
@@ -49,7 +50,7 @@ public class sqliteDBController {
 
         try {
             Statement stmt = dbAppsDatasetConnection.createStatement();
-            ResultSet rs = stmt.executeQuery("SELECT name FROM APP " );
+            ResultSet rs = stmt.executeQuery("SELECT name FROM APP");
             int count = 0;
             while(rs.next()) {
                 //int dataSetAppId = rs.getInt("id");

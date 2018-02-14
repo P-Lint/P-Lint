@@ -19,7 +19,7 @@
             <configuration>
               <transformers>
                 <transformer>
-                  <mainClass>com.analyzingmapps.app.analyzer</mainClass>
+                  <mainClass>com.analyzingmapps.app.Analyzer</mainClass>
                 </transformer>
               </transformers>
             </configuration>
