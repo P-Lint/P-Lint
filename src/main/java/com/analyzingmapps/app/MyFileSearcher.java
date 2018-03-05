@@ -14,8 +14,9 @@ import java.util.List;
 import java.util.Set;
 
 public class MyFileSearcher extends SimpleFileVisitor<Path> {
-    private static String MANIFEST_FILE = "AndroidManifest.xml";
-    private Analyzer Analyzer;
+    private Analyzer analyzer;
+    Path parentDir;
+    boolean isJavaProject = false; // true when at least one java file is found
 
     //Variable to search unique File name
     Path foundPath;
@@ -27,7 +28,7 @@ public class MyFileSearcher extends SimpleFileVisitor<Path> {
     private Set<MyFileParserVisitor> foundJavaFiles = new HashSet<>();
 
     MyFileSearcher(Analyzer an) {
-        this.Analyzer = an;
+        this.analyzer = an;
     }
 
     MyFileSearcher(String fileName) {
@@ -55,28 +56,19 @@ public class MyFileSearcher extends SimpleFileVisitor<Path> {
             return FileVisitResult.TERMINATE;
 
         } else if (matcher.matches(filePath.getFileName())) { //Analyze all *.java
-
-            //System.out.println("JAVA FILE -> " + filePath.getFileName());
-            //Analyzer.this.analyzeSourceCode(filePath);
+            isJavaProject = true;
             checkPermissionUsage(filePath.toFile());
-
-        } else if (filePath.getFileName().toString().equals(MANIFEST_FILE)) {
-
-            //System.out.println("XML FILE -> " + filePath.getFileName());
+        } else if (filePath.getFileName().toString().equals(analyzer.MANIFEST_FILE)) {
             foundManifests.add(filePath);
-
         }
         return FileVisitResult.CONTINUE;
     }
 
-    private void checkPermissionUsage(File file) {
+    public void checkPermissionUsage(File file) {
 
         MyFileParserVisitor currentFileVisitor = new MyFileParserVisitor();
         try {
-            FileInputStream in = new FileInputStream(file);
-            CompilationUnit cu;
-            cu = JavaParser.parse(in);
-            in.close();
+            CompilationUnit cu = JavaParser.parse(file);
 
             currentFileVisitor.compilationUnit = cu;
             currentFileVisitor.file = file;
@@ -87,7 +79,7 @@ public class MyFileSearcher extends SimpleFileVisitor<Path> {
             }
         } catch (Exception e) {
             System.out.println("Something went wrong parsing " + file.getPath());
-            Analyzer.logError(file.getPath(), e.getMessage(), "checkPermissionUsage");
+            analyzer.logError(file.getPath(), e.getMessage(), "checkPermissionUsage");
         }
     }
 
